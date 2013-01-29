@@ -24,3 +24,7 @@ filesInCmd = " ".join(sourceFiles)
 
 finalCmd = compiler + " -j " + outFile + " -c " + filesInCmd
 os.system(finalCmd)
+workerPath = 'src/traceWebWorker.coffee'
+workerOutFile = 'web/traceWebWorker.js'
+command = compiler + ' -c ' + workerPath
+os.system(compiler + ' -j ' + workerOutFile + ' -c ' + workerPath)

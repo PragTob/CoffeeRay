@@ -1,8 +1,25 @@
+NUMBER_OF_WORKERS = 4
+
 class Raytracer
     constructor: (@target, @backgroundColor, @viewport) ->
-        @viewport ?= Viewport.defaultViewport(@target.width, @target.height)
         @traceables = []
         @lights = []
+        @pixelsProcessed = 0
+        @totalPixels = (@target.width + 1) * (@target.height + 1)
+        @createActors()
+        
+    createActors: ->
+        @actors = []
+        for i in [0...NUMBER_OF_WORKERS]
+            @actors[i] = new Worker('traceWebWorker.js')
+            @actors[i].addEventListener('message', -> console.log 'foo bar', false)#@drawPixel
+            @actors[i].onerror = (event)-> console.log 'worker error: ' + event.message
+
+    drawPixel: (data)->
+        @target.setPixel(data.x, data.y, data.color)
+        @pixelsProcessed++
+        console.log @pixelsProcessed
+        @target.finishedRendering() if @pixelsProcessed >= @totalPixels
     
     addTraceable: (object) -> 
         @traceables.push object
@@ -11,48 +28,15 @@ class Raytracer
         @lights.push light
     
     render: ->
-        @processPixel(x, y) for x in [0..@target.width] for y in [0..@target.height]
-        @target.finishedRendering()
-    
-    processPixel: (x, y) ->
-        @target.setPixel(x, y, @determineColorAt(x, y))
-        
-    determineColorAt: (x, y) ->
-        ray = @viewport.constructRayForPixel(x, y) 
-        closestHit = @findIntersection(ray)
-        
-        if closestHit? 
-            @determineHitColor closestHit 
-        else
-            @backgroundColor
-    
-    findIntersection: (ray) ->
-        findFunc = (current, next) -> 
-            test = next.testIntersection ray
-            return test if test?.distance < (current?.distance ? Infinity)
-            current
-            
-        _.foldl @traceables, findFunc, null
-                
-    determineHitColor: (closestHit) ->
-        phongModel = new PhongModel(closestHit)
-        _.each @lights, (light) =>
-            @calculateLighting light, phongModel
-        phongModel.getColor()
-        
-    calculateLighting: (light, phongModel) ->
-        lightVector = light.position.subtract phongModel.targetPosition
-        lightDistance = lightVector.length()
-        
-        # This has the same effect as calling normalize, but we save
-        # one length calculation since the length is already known.
-        lightVector = lightVector.multiplyScalar(1.0 / lightDistance) 
-        lightRay = new Ray(phongModel.targetPosition, lightVector)
+        i = 0 
+        @processPixel(x, y, (i++ % NUMBER_OF_WORKERS)) for x in [0..@target.width] for y in [0..@target.height]
 
-        unless @checkIfInShadow lightRay, lightDistance
-            phongModel.contributeLight lightVector, light
-            
-    checkIfInShadow: (ray, lightDistance) ->
-        _.any @traceables, (each) -> 
-            test = each.testIntersection ray
-            test? and test.distance < lightDistance
+    processPixel: (x, y, i) ->
+        args =
+            x: x
+            y: y
+            traceables: @traceables
+            lights: @lights
+            height: @target.height
+            width: @target.width
+        @actors[i].postMessage(args)
